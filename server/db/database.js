@@ -1,10 +1,7 @@
-// server/db/database.js
-// Слой базы данных. Использует встроенный в Node.js модуль node:sqlite (Node 22+).
-// Если на сервере другая версия Node — см. README.md, раздел "Требования".
-
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
 
 const DB_DIR = path.join(__dirname, '..', '..', 'data');
 const DB_PATH = path.join(DB_DIR, 'courier.db');
@@ -18,8 +15,7 @@ const db = new DatabaseSync(DB_PATH);
 // Включаем поддержку внешних ключей
 db.exec('PRAGMA foreign_keys = ON;');
 
-// --- Схема таблиц ---
-
+// --- 1. Схема таблиц (создаем всё один раз) ---
 db.exec(`
   CREATE TABLE IF NOT EXISTS admins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,9 +23,7 @@ db.exec(`
     password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-`);
 
-db.exec(`
   CREATE TABLE IF NOT EXISTS couriers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     full_name TEXT NOT NULL,
@@ -45,9 +39,7 @@ db.exec(`
     notes TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
-`);
 
-db.exec(`
   CREATE TABLE IF NOT EXISTS locations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     courier_id INTEGER NOT NULL,
@@ -57,12 +49,23 @@ db.exec(`
     recorded_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (courier_id) REFERENCES couriers(id) ON DELETE CASCADE
   );
-`);
 
-// Индекс для быстрого поиска последней точки курьера
-db.exec(`
   CREATE INDEX IF NOT EXISTS idx_locations_courier_time
   ON locations(courier_id, recorded_at DESC);
 `);
+
+// --- 2. АВТОМАТИЧЕСКОЕ СОЗДАНИЕ АДМИНА ---
+const adminUser = 'admin';
+const adminPass = '123321';
+
+const existingAdmin = db.prepare('SELECT id FROM admins WHERE username = ?').get(adminUser);
+
+if (!existingAdmin) {
+  console.log('Администратор не найден, создаю дефолтного...');
+  const passwordHash = bcrypt.hashSync(adminPass, 10);
+  db.prepare('INSERT INTO admins (username, password_hash) VALUES (?, ?)')
+    .run(adminUser, passwordHash);
+  console.log('Администратор "admin" успешно создан.');
+}
 
 module.exports = db;
