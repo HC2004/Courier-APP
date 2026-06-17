@@ -13,7 +13,7 @@
 // фейковые логины) — это нарушает условия использования Instagram и может
 // привести к блокировке IP или аккаунтов.
 
-const { JSDOM } = require('jsdom');
+/*const { JSDOM } = require('jsdom');
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -39,9 +39,9 @@ function getMetaContent(document, property) {
 /**
  * Пытается получить публичные данные профиля.
  * @param {string} profileUrl - ссылка на профиль, например https://instagram.com/har8ut
- * @returns {Promise<{success: true, username, avatarUrl, bio, displayName} | {success: false, reason: string}>}
+   @returns {Promise<{success: true, username, avatarUrl, bio, displayName} | {success: false, reason: string}>}
  */
-async function fetchInstagramProfile(profileUrl) {
+/*async function fetchInstagramProfile(profileUrl) {
   const username = extractUsernameFromUrl(profileUrl);
 
   if (!username) {
@@ -131,3 +131,4 @@ async function fetchInstagramProfile(profileUrl) {
 }
 
 module.exports = { fetchInstagramProfile, extractUsernameFromUrl };
+*/
