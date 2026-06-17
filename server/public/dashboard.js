@@ -1,5 +1,3 @@
-// server/public/dashboard.js
-
 const courierGrid = document.getElementById('courierGrid');
 const emptyState = document.getElementById('emptyState');
 const courierCount = document.getElementById('courierCount');
@@ -12,10 +10,6 @@ const fetchPreview = document.getElementById('fetchPreview');
 
 const linkModalOverlay = document.getElementById('linkModalOverlay');
 const linkDisplay = document.getElementById('linkDisplay');
-
-let map = null;
-let markers = {};
-let liveRefreshInterval = null;
 
 // --- Авторизация / выход ---
 async function checkAuth() {
@@ -30,72 +24,6 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   await fetch('/api/logout', { method: 'POST' });
   window.location.href = '/login';
 });
-
-// --- Карта ---
-function initMap() {
-  map = L.map('liveMap', {
-    zoomControl: true,
-    attributionControl: true,
-  }).setView([55.7558, 37.6173], 11); // Москва по умолчанию — сместится при первых данных
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 19,
-  }).addTo(map);
-}
-
-function courierIcon(avatarPath, isOnline) {
-  const color = isOnline ? '#3ddc84' : '#5c6680';
-  const imgHtml = avatarPath
-    ? `<img src="${avatarPath}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;">`
-    : `<div style="width:32px;height:32px;border-radius:50%;background:#1d2536;"></div>`;
-
-  return L.divIcon({
-    className: '',
-    html: `<div style="width:38px;height:38px;border-radius:50%;border:3px solid ${color};display:flex;align-items:center;justify-content:center;background:#161d2b;">${imgHtml}</div>`,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-  });
-}
-
-async function refreshLiveLocations() {
-  try {
-    const res = await fetch('/api/locations/live');
-    const data = await res.json();
-
-    let hasAnyLocation = false;
-    const bounds = [];
-
-    data.couriers.forEach((c) => {
-      if (!c.location) return;
-      hasAnyLocation = true;
-      const { latitude, longitude } = c.location;
-      bounds.push([latitude, longitude]);
-
-      const isOnline = c.status === 'online';
-      const icon = courierIcon(c.avatarPath, isOnline);
-
-      if (markers[c.id]) {
-        markers[c.id].setLatLng([latitude, longitude]);
-        markers[c.id].setIcon(icon);
-      } else {
-        markers[c.id] = L.marker([latitude, longitude], { icon }).addTo(map);
-      }
-
-      markers[c.id].bindPopup(
-        `<strong>${escapeHtml(c.fullName)}</strong><br>${isOnline ? 'На смене' : 'Не в сети'}`
-      );
-    });
-
-    // Подгоняем карту под первые полученные точки (один раз, не дёргаем зум постоянно)
-    if (hasAnyLocation && !map._hasFitOnce) {
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
-      map._hasFitOnce = true;
-    }
-  } catch (err) {
-    console.error('Не удалось обновить карту:', err);
-  }
-}
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -315,12 +243,9 @@ courierForm.addEventListener('submit', async (e) => {
 
 // --- Инициализация ---
 checkAuth();
-initMap();
 loadCouriers();
-refreshLiveLocations();
-liveRefreshInterval = setInterval(refreshLiveLocations, 4000);
 
-// Обновляем список карточек реже, чтобы не дёргать поиск во время ввода
+// Обновляем список карточек каждые 10 секунд
 setInterval(() => {
   if (document.activeElement !== searchInput) {
     loadCouriers(searchInput.value);
