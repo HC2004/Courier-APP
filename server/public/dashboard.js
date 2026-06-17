@@ -251,3 +251,15 @@ setInterval(() => {
     loadCouriers(searchInput.value);
   }
 }, 10000);
+
+// Слушаем данные, которые мы "прислали" из букмарклета
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'INSTA_DATA') {
+    const data = event.data.payload;
+    document.getElementById('usernameInput').value = data.username || '';
+    document.getElementById('fullNameInput').value = data.displayName || '';
+    document.getElementById('bioInput').value = data.bio || '';
+    document.getElementById('resolvedFollowers').value = data.followers || '';
+    alert('Данные из профиля успешно подставлены!');
+  }
+});
