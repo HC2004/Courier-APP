@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вход — Курьерская система</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <div class="login-brand">
+        <span class="dot"></span>
+        <span>CourierTrack</span>
+      </div>
+      <p class="login-subtitle">Вход для администратора</p>
+
+      <div class="login-error" id="loginError"></div>
+
+      <form id="loginForm">
+        <div class="field-group">
+          <label class="field-label" for="username">Имя пользователя</label>
+          <input class="field-input" type="text" id="username" name="username" autocomplete="username" required>
+        </div>
+        <div class="field-group">
+          <label class="field-label" for="password">Пароль</label>
+          <input class="field-input" type="password" id="password" name="password" autocomplete="current-password" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 8px;">
+          Войти
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('loginForm');
+    const errorBox = document.getElementById('loginError');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errorBox.classList.remove('show');
+
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          window.location.href = '/';
+        } else {
+          errorBox.textContent = data.error || 'Не удалось войти';
+          errorBox.classList.add('show');
+        }
+      } catch (err) {
+        errorBox.textContent = 'Ошибка сети. Попробуйте снова.';
+        errorBox.classList.add('show');
+      }
+    });
+  </script>
+</body>
+</html>
