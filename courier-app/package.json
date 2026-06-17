@@ -1,0 +1,21 @@
+{
+  "name": "courier-tracker",
+  "version": "1.0.0",
+  "description": "Курьерская трекинг-система",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "jsdom": "^29.1.1",
+    "multer": "^2.2.0"
+  }
+}
