@@ -253,13 +253,15 @@ setInterval(() => {
 }, 10000);
 
 // Слушаем данные, которые мы "прислали" из букмарклета
-window.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'INSTA_DATA') {
-    const data = event.data.payload;
-    document.getElementById('usernameInput').value = data.username || '';
-    document.getElementById('fullNameInput').value = data.displayName || '';
-    document.getElementById('bioInput').value = data.bio || '';
-    document.getElementById('resolvedFollowers').value = data.followers || '';
-    alert('Данные из профиля успешно подставлены!');
+window.addEventListener('load', () => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('username')) {
+    document.getElementById('usernameInput').value = params.get('username') || '';
+    document.getElementById('fullNameInput').value = params.get('name') || '';
+    document.getElementById('bioInput').value = params.get('bio') || '';
+    document.getElementById('resolvedFollowers').value = params.get('followers') || '';
+    
+    // Открываем модалку автоматически
+    openModal(); 
   }
 });
