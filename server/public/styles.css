@@ -160,6 +160,8 @@ input, textarea, select {
   max-width: 1280px;
   margin: 0 auto;
   padding: 32px 28px 80px;
+  display: flex;
+  flex-direction: column;
 }
 
 .page-header {
@@ -219,6 +221,7 @@ input, textarea, select {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 18px;
+  order: 1;
 }
 
 .courier-card {
@@ -561,6 +564,7 @@ textarea.field-input {
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--border-subtle);
+  order: 2;
 }
 
 #liveMap {
