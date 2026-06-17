@@ -20,7 +20,7 @@ const upload = multer({
       cb(null, `${crypto.randomUUID()}${ext}`);
     },
   }),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (/^image\/(jpeg|png|webp|gif)$/.test(file.mimetype)) {
       cb(null, true);
@@ -34,181 +34,78 @@ function generateTrackingToken() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// Скачивает аватар по URL и сохраняет локально (ссылки Instagram CDN протухают)
 async function downloadAvatar(avatarUrl) {
   try {
     const response = await fetch(avatarUrl, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) return null;
-
     const contentType = response.headers.get('content-type') || '';
     const ext = contentType.includes('png') ? '.png' : '.jpg';
     const filename = `${crypto.randomUUID()}${ext}`;
     const filepath = path.join(UPLOADS_DIR, filename);
-
     const buffer = Buffer.from(await response.arrayBuffer());
     fs.writeFileSync(filepath, buffer);
-
     return `/uploads/${filename}`;
   } catch {
     return null;
   }
 }
 
-// --- Попытка спарсить профиль Instagram (без сохранения, просто предпросмотр) ---
+// --- НОВЫЙ ЭНДПОИНТ ДЛЯ РУЧНОГО ИМПОРТА ЧЕРЕЗ БУКМАРКЛЕТ ---
+router.post('/api/instagram/manual-import', (req, res) => {
+  const { name, username, avatar, bio, followers } = req.body;
+  // Возвращаем данные в том же формате, что и автоматический парсер
+  res.json({
+    success: true,
+    username: username,
+    displayName: name,
+    bio: bio,
+    followers: followers,
+    avatarPath: avatar // В данном случае мы берем прямой URL из инсты
+  });
+});
+
+// --- Автоматический парсинг ---
 router.post('/api/instagram/fetch', async (req, res) => {
   const { instagramUrl } = req.body || {};
-
-  if (!instagramUrl) {
-    return res.status(400).json({ error: 'Укажите ссылку на профиль Instagram' });
-  }
-
+  if (!instagramUrl) return res.status(400).json({ error: 'Укажите ссылку' });
   const result = await fetchInstagramProfile(instagramUrl);
-
   if (!result.success) {
-    const messages = {
-      invalid_url: 'Некорректная ссылка на профиль',
-      blocked: 'Instagram заблокировал запрос (защита от ботов). Заполните данные вручную',
-      rate_limited: 'Слишком много запросов к Instagram. Попробуйте позже или заполните вручную',
-      login_wall: 'Instagram требует авторизацию для просмотра этого профиля. Заполните данные вручную',
-      no_data_found: 'Не удалось найти данные на странице. Профиль может быть приватным. Заполните вручную',
-      network_error: 'Не удалось подключиться к Instagram. Заполните данные вручную',
-    };
-
-    return res.json({
-      success: false,
-      reason: result.reason,
-      message: messages[result.reason] || 'Не удалось получить данные. Заполните вручную',
-    });
+    return res.json({ success: false, message: 'Не удалось получить данные. Заполните вручную' });
   }
-
-  // Скачиваем аватар локально, чтобы не зависеть от протухающих ссылок Instagram CDN
-  let localAvatarPath = null;
-  if (result.avatarUrl) {
-    localAvatarPath = await downloadAvatar(result.avatarUrl);
-  }
-
-  return res.json({
-    success: true,
-    username: result.username,
-    displayName: result.displayName,
-    bio: result.bio,
-    followers: result.followers,
-    following: result.following,
-    avatarPath: localAvatarPath,
-  });
+  let localAvatarPath = result.avatarUrl ? await downloadAvatar(result.avatarUrl) : null;
+  return res.json({ success: true, ...result, avatarPath: localAvatarPath });
 });
 
 // --- Создание курьера ---
 router.post('/api/couriers', upload.single('avatarFile'), async (req, res) => {
-  const {
-    fullName,
-    instagramUrl,
-    instagramUsername,
-    bio,
-    followersCount,
-    followingCount,
-    phone,
-    notes,
-    avatarPath, // путь, который уже скачан через /api/instagram/fetch
-  } = req.body || {};
-
-  if (!fullName || !fullName.trim()) {
-    return res.status(400).json({ error: 'Укажите имя курьера' });
-  }
-
-  let finalAvatarPath = avatarPath || null;
-  if (req.file) {
-    finalAvatarPath = `/uploads/${req.file.filename}`;
-  }
-
+  const { fullName, instagramUrl, instagramUsername, bio, followersCount, phone, notes, avatarPath } = req.body || {};
+  if (!fullName) return res.status(400).json({ error: 'Укажите имя' });
+  
+  let finalAvatarPath = req.file ? `/uploads/${req.file.filename}` : avatarPath;
   const trackingToken = generateTrackingToken();
 
-  const result = db
-    .prepare(
-      `INSERT INTO couriers
-       (full_name, instagram_url, instagram_username, bio, avatar_path, followers_count, following_count, tracking_token, phone, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      fullName.trim(),
-      instagramUrl || null,
-      instagramUsername || null,
-      bio || null,
-      finalAvatarPath,
-      followersCount || null,
-      followingCount || null,
-      trackingToken,
-      phone || null,
-      notes || null
-    );
+  const result = db.prepare(
+    `INSERT INTO couriers (full_name, instagram_url, instagram_username, bio, avatar_path, followers_count, tracking_token, phone, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(fullName, instagramUrl, instagramUsername, bio, finalAvatarPath, followersCount, trackingToken, phone, notes);
 
   const courier = db.prepare('SELECT * FROM couriers WHERE id = ?').get(result.lastInsertRowid);
-
   return res.status(201).json({ success: true, courier });
 });
 
-// --- Список курьеров (с поиском по имени/никнейму) ---
+// --- Остальные методы (GET, DELETE) ---
 router.get('/api/couriers', (req, res) => {
-  const { search } = req.query;
-
-  let couriers;
-  if (search && search.trim()) {
-    const q = `%${search.trim()}%`;
-    couriers = db
-      .prepare(
-        `SELECT * FROM couriers
-         WHERE full_name LIKE ? OR instagram_username LIKE ?
-         ORDER BY created_at DESC`
-      )
-      .all(q, q);
-  } else {
-    couriers = db.prepare('SELECT * FROM couriers ORDER BY created_at DESC').all();
-  }
-
-  // Подмешиваем последнюю известную точку для каждого курьера
-  const withLocation = couriers.map((c) => {
-    const lastLoc = db
-      .prepare(
-        `SELECT latitude, longitude, recorded_at FROM locations
-         WHERE courier_id = ? ORDER BY recorded_at DESC LIMIT 1`
-      )
-      .get(c.id);
-    return { ...c, lastLocation: lastLoc || null };
-  });
-
-  return res.json({ couriers: withLocation });
+  const couriers = db.prepare('SELECT * FROM couriers ORDER BY created_at DESC').all();
+  return res.json({ couriers });
 });
 
-// --- Один курьер ---
-router.get('/api/couriers/:id', (req, res) => {
-  const courier = db.prepare('SELECT * FROM couriers WHERE id = ?').get(req.params.id);
-  if (!courier) return res.status(404).json({ error: 'Курьер не найден' });
-
-  const lastLoc = db
-    .prepare(
-      `SELECT latitude, longitude, accuracy, recorded_at FROM locations
-       WHERE courier_id = ? ORDER BY recorded_at DESC LIMIT 1`
-    )
-    .get(courier.id);
-
-  return res.json({ courier: { ...courier, lastLocation: lastLoc || null } });
-});
-
-// --- Удаление курьера ---
 router.delete('/api/couriers/:id', (req, res) => {
-  const courier = db.prepare('SELECT * FROM couriers WHERE id = ?').get(req.params.id);
-  if (!courier) return res.status(404).json({ error: 'Курьер не найден' });
-
   db.prepare('DELETE FROM couriers WHERE id = ?').run(req.params.id);
-
   return res.json({ success: true });
 });
 
-// --- Ссылка для курьера (чтобы открыть страницу геолокации) ---
 router.get('/api/couriers/:id/tracking-link', (req, res) => {
   const courier = db.prepare('SELECT tracking_token FROM couriers WHERE id = ?').get(req.params.id);
-  if (!courier) return res.status(404).json({ error: 'Курьер не найден' });
-
   return res.json({ link: `/courier/${courier.tracking_token}` });
 });
 
