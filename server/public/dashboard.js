@@ -1,328 +1,153 @@
-// server/public/dashboard.js
-
-const courierGrid = document.getElementById('courierGrid');
-const emptyState = document.getElementById('emptyState');
-const courierCount = document.getElementById('courierCount');
-const searchInput = document.getElementById('searchInput');
-
-const modalOverlay = document.getElementById('modalOverlay');
-const courierForm = document.getElementById('courierForm');
-const fetchStatus = document.getElementById('fetchStatus');
-const fetchPreview = document.getElementById('fetchPreview');
-
-const linkModalOverlay = document.getElementById('linkModalOverlay');
-const linkDisplay = document.getElementById('linkDisplay');
-
-let map = null;
-let markers = {};
-let liveRefreshInterval = null;
-
-// --- Авторизация / выход ---
-async function checkAuth() {
-  const res = await fetch('/api/me');
-  const data = await res.json();
-  if (data.authenticated) {
-    document.getElementById('adminUsername').textContent = data.username;
-  }
-}
-
-document.getElementById('logoutBtn').addEventListener('click', async () => {
-  await fetch('/api/logout', { method: 'POST' });
-  window.location.href = '/login';
-});
-
-// --- Карта ---
-function initMap() {
-  map = L.map('liveMap', {
-    zoomControl: true,
-    attributionControl: true,
-  }).setView([55.7558, 37.6173], 11); // Москва по умолчанию — сместится при первых данных
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 19,
-  }).addTo(map);
-}
-
-function courierIcon(avatarPath, isOnline) {
-  const color = isOnline ? '#3ddc84' : '#5c6680';
-  const imgHtml = avatarPath
-    ? `<img src="${avatarPath}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;">`
-    : `<div style="width:32px;height:32px;border-radius:50%;background:#1d2536;"></div>`;
-
-  return L.divIcon({
-    className: '',
-    html: `<div style="width:38px;height:38px;border-radius:50%;border:3px solid ${color};display:flex;align-items:center;justify-content:center;background:#161d2b;">${imgHtml}</div>`,
-    iconSize: [38, 38],
-    iconAnchor: [19, 19],
-  });
-}
-
-async function refreshLiveLocations() {
-  try {
-    const res = await fetch('/api/locations/live');
-    const data = await res.json();
-
-    let hasAnyLocation = false;
-    const bounds = [];
-
-    data.couriers.forEach((c) => {
-      if (!c.location) return;
-      hasAnyLocation = true;
-      const { latitude, longitude } = c.location;
-      bounds.push([latitude, longitude]);
-
-      const isOnline = c.status === 'online';
-      const icon = courierIcon(c.avatarPath, isOnline);
-
-      if (markers[c.id]) {
-        markers[c.id].setLatLng([latitude, longitude]);
-        markers[c.id].setIcon(icon);
-      } else {
-        markers[c.id] = L.marker([latitude, longitude], { icon }).addTo(map);
-      }
-
-      markers[c.id].bindPopup(
-        `<strong>${escapeHtml(c.fullName)}</strong><br>${isOnline ? 'На смене' : 'Не в сети'}`
-      );
-    });
-
-    // Подгоняем карту под первые полученные точки (один раз, не дёргаем зум постоянно)
-    if (hasAnyLocation && !map._hasFitOnce) {
-      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
-      map._hasFitOnce = true;
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Курьеры — CourierTrack</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .leaflet-popup-content-wrapper {
+      background: var(--bg-panel-raised);
+      color: var(--text-primary);
+      border-radius: 8px;
     }
-  } catch (err) {
-    console.error('Не удалось обновить карту:', err);
-  }
-}
+    .leaflet-popup-tip { background: var(--bg-panel-raised); }
+    .leaflet-popup-content { font-family: var(--font-body); font-size: 13px; margin: 10px 14px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-brand">
+      <span class="dot"></span>
+      <span>CourierTrack</span>
+    </div>
+    <div class="topbar-actions">
+      <span id="adminUsername" style="color: var(--text-secondary); font-size: 14px;"></span>
+      <button class="btn btn-ghost" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
 
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str || '';
-  return div.innerHTML;
-}
-
-// --- Загрузка и отрисовка курьеров ---
-async function loadCouriers(search = '') {
-  const url = search ? `/api/couriers?search=${encodeURIComponent(search)}` : '/api/couriers';
-  const res = await fetch(url);
-  const data = await res.json();
-  renderCouriers(data.couriers);
-}
-
-function statusLabel(status) {
-  return status === 'online' ? 'На смене' : 'Не в сети';
-}
-
-function renderCouriers(couriers) {
-  courierGrid.innerHTML = '';
-
-  if (couriers.length === 0) {
-    emptyState.style.display = 'block';
-    courierCount.textContent = 'Курьеров пока нет';
-    return;
-  }
-
-  emptyState.style.display = 'none';
-  courierCount.textContent = `${couriers.length} ${couriers.length === 1 ? 'курьер' : 'курьеров'}`;
-
-  couriers.forEach((c) => {
-    const card = document.createElement('div');
-    card.className = 'courier-card';
-
-    const avatarHtml = c.avatar_path
-      ? `<img class="courier-avatar" src="${c.avatar_path}" alt="">`
-      : `<div class="courier-avatar-placeholder">${(c.full_name || '?')[0].toUpperCase()}</div>`;
-
-    card.innerHTML = `
-      <div class="courier-card-top">
-        ${avatarHtml}
-        <div class="courier-info">
-          <p class="courier-name">${escapeHtml(c.full_name)}</p>
-          ${c.instagram_username ? `<span class="courier-username">@${escapeHtml(c.instagram_username)}</span>` : ''}
+  <div class="page">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Курьеры</h1>
+        <p class="page-subtitle" id="courierCount">Загрузка...</p>
+      </div>
+      <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <div class="search-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>
+          </svg>
+          <input type="text" id="searchInput" placeholder="Поиск по имени или никнейму...">
         </div>
+        <button class="btn btn-primary" id="addCourierBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          Добавить курьера
+        </button>
       </div>
-      <span class="status-badge ${c.status === 'online' ? 'online' : 'offline'}">
-        <span class="pulse"></span>${statusLabel(c.status)}
-      </span>
-      ${c.bio ? `<p class="courier-bio" style="margin-top:12px;">${escapeHtml(c.bio)}</p>` : ''}
-      <div class="courier-stats">
-        ${c.followers_count ? `<span><strong>${escapeHtml(c.followers_count)}</strong> подписчиков</span>` : ''}
+    </div>
+
+    <div id="courierGrid" class="courier-grid"></div>
+    <div class="map-section">
+      <div id="liveMap"></div>
+    </div>
+    <div id="emptyState" class="empty-state" style="display: none;">
+      <h3>Пока нет курьеров</h3>
+      <p>Добавь первого курьера, вставив ссылку на его профиль Instagram — система попробует подтянуть фото и описание автоматически.</p>
+      <button class="btn btn-primary" id="emptyAddBtn">Добавить курьера</button>
+    </div>
+  </div>
+
+  <!-- Модальное окно добавления курьера -->
+  <div class="modal-overlay" id="modalOverlay" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Новый курьер</h2>
+        <button class="modal-close" id="modalCloseBtn">&times;</button>
       </div>
-      <div class="courier-card-actions">
-        <button class="btn btn-ghost details-btn" data-id="${c.id}">Маршрут</button>
-        <button class="btn btn-ghost link-btn" data-id="${c.id}">Ссылка</button>
-        <button class="btn btn-danger delete-btn" data-id="${c.id}">Удалить</button>
+
+      <form id="courierForm">
+        <div class="field-group">
+          <label class="field-label" for="instagramUrlInput">Ссылка на Instagram</label>
+          <div class="fetch-row">
+            <input class="field-input" type="text" id="instagramUrlInput" placeholder="https://instagram.com/username">
+            <button type="button" class="btn" id="fetchInstagramBtn">Получить данные</button>
+          </div>
+          <div class="inline-status" id="fetchStatus"></div>
+          <div class="preview-row" id="fetchPreview">
+            <img id="previewAvatar" src="" alt="">
+            <div class="preview-text">
+              <strong id="previewName"></strong>
+              <span id="previewFollowers"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="fullNameInput">Имя курьера *</label>
+          <input class="field-input" type="text" id="fullNameInput" required placeholder="Иван Иванов">
+        </div>
+
+        <div class="field-row">
+          <div class="field-group">
+            <label class="field-label" for="usernameInput">Никнейм Instagram</label>
+            <input class="field-input" type="text" id="usernameInput" placeholder="username">
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="phoneInput">Телефон</label>
+            <input class="field-input" type="text" id="phoneInput" placeholder="+7 900 000-00-00">
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="bioInput">Описание / био</label>
+          <textarea class="field-input" id="bioInput" placeholder="Заполнится автоматически или впиши вручную"></textarea>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="avatarFileInput">Фото (если автоматически не получилось)</label>
+          <input class="field-input" type="file" id="avatarFileInput" accept="image/*">
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="notesInput">Заметки</label>
+          <textarea class="field-input" id="notesInput" placeholder="Любая дополнительная информация"></textarea>
+        </div>
+
+        <input type="hidden" id="resolvedAvatarPath">
+        <input type="hidden" id="resolvedFollowers">
+        <input type="hidden" id="resolvedFollowing">
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" id="cancelBtn">Отмена</button>
+          <button type="submit" class="btn btn-primary">Сохранить курьера</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Модальное окно со ссылкой для курьера -->
+  <div class="modal-overlay" id="linkModalOverlay" hidden>
+    <div class="modal" style="max-width: 420px;">
+      <div class="modal-header">
+        <h2>Ссылка для курьера</h2>
+        <button class="modal-close" id="linkModalCloseBtn">&times;</button>
       </div>
-    `;
+      <p style="font-size: 14px; color: var(--text-secondary); margin-top: 0;">
+        Отправь эту ссылку курьеру. Когда он откроет её на смене и нажмёт «Начать смену»,
+        его местоположение появится на карте.
+      </p>
+      <div class="field-input" id="linkDisplay" style="word-break: break-all; font-family: var(--font-mono); font-size: 13px; margin-bottom: 14px;"></div>
+      <button class="btn btn-primary" id="copyLinkBtn" style="width: 100%; justify-content: center;">Скопировать ссылку</button>
+    </div>
+  </div>
 
-    courierGrid.appendChild(card);
-  });
-
-  document.querySelectorAll('.details-btn').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      window.location.href = `/admin/courier/${btn.dataset.id}`;
-    });
-  });
-
-  document.querySelectorAll('.link-btn').forEach((btn) => {
-    btn.addEventListener('click', () => showTrackingLink(btn.dataset.id));
-  });
-
-  document.querySelectorAll('.delete-btn').forEach((btn) => {
-    btn.addEventListener('click', () => deleteCourier(btn.dataset.id));
-  });
-}
-
-async function showTrackingLink(id) {
-  const res = await fetch(`/api/couriers/${id}/tracking-link`);
-  const data = await res.json();
-  const fullLink = `${window.location.origin}${data.link}`;
-  linkDisplay.textContent = fullLink;
-  linkModalOverlay.hidden = false;
-
-  document.getElementById('copyLinkBtn').onclick = async () => {
-    await navigator.clipboard.writeText(fullLink);
-    document.getElementById('copyLinkBtn').textContent = 'Скопировано!';
-    setTimeout(() => {
-      document.getElementById('copyLinkBtn').textContent = 'Скопировать ссылку';
-    }, 1500);
-  };
-}
-
-async function deleteCourier(id) {
-  if (!confirm('Удалить этого курьера? Это действие нельзя отменить.')) return;
-  await fetch(`/api/couriers/${id}`, { method: 'DELETE' });
-  loadCouriers(searchInput.value);
-}
-
-// --- Поиск ---
-let searchDebounce = null;
-searchInput.addEventListener('input', () => {
-  clearTimeout(searchDebounce);
-  searchDebounce = setTimeout(() => loadCouriers(searchInput.value), 300);
-});
-
-// --- Модалка добавления курьера ---
-function openModal() {
-  courierForm.reset();
-  fetchStatus.className = 'inline-status';
-  fetchPreview.className = 'preview-row';
-  document.getElementById('resolvedAvatarPath').value = '';
-  modalOverlay.hidden = false;
-}
-
-function closeModal() {
-  modalOverlay.hidden = true;
-}
-
-document.getElementById('addCourierBtn').addEventListener('click', openModal);
-document.getElementById('emptyAddBtn').addEventListener('click', openModal);
-document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
-document.getElementById('cancelBtn').addEventListener('click', closeModal);
-document.getElementById('linkModalCloseBtn').addEventListener('click', () => {
-  linkModalOverlay.hidden = true;
-});
-
-modalOverlay.addEventListener('click', (e) => {
-  if (e.target === modalOverlay) closeModal();
-});
-
-// --- Получение данных из Instagram ---
-document.getElementById('fetchInstagramBtn').addEventListener('click', async () => {
-  const url = document.getElementById('instagramUrlInput').value.trim();
-  if (!url) return;
-
-  fetchStatus.className = 'inline-status show info';
-  fetchStatus.textContent = 'Пытаюсь получить данные...';
-  fetchPreview.className = 'preview-row';
-
-  try {
-    const res = await fetch('/api/instagram/fetch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instagramUrl: url }),
-    });
-    const data = await res.json();
-
-    if (data.success) {
-      fetchStatus.className = 'inline-status show success';
-      fetchStatus.textContent = 'Данные получены и подставлены в форму.';
-
-      document.getElementById('usernameInput').value = data.username || '';
-      if (!document.getElementById('fullNameInput').value) {
-        document.getElementById('fullNameInput').value = data.displayName || data.username || '';
-      }
-      document.getElementById('bioInput').value = data.bio || '';
-      document.getElementById('resolvedAvatarPath').value = data.avatarPath || '';
-      document.getElementById('resolvedFollowers').value = data.followers || '';
-
-      if (data.avatarPath) {
-        document.getElementById('previewAvatar').src = data.avatarPath;
-        document.getElementById('previewName').textContent = data.displayName || data.username;
-        document.getElementById('previewFollowers').textContent = data.followers
-          ? `${data.followers} подписчиков`
-          : '';
-        fetchPreview.className = 'preview-row show';
-      }
-    } else {
-      fetchStatus.className = 'inline-status show warning';
-      fetchStatus.textContent = data.message + ' Поля ниже можно заполнить вручную.';
-      document.getElementById('usernameInput').value =
-        url.split('/').filter(Boolean).pop() || '';
-    }
-  } catch (err) {
-    fetchStatus.className = 'inline-status show warning';
-    fetchStatus.textContent = 'Не удалось связаться с сервером. Заполните данные вручную.';
-  }
-});
-
-// --- Сохранение курьера ---
-courierForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-
-  const avatarFile = document.getElementById('avatarFileInput').files[0];
-  const formData = new FormData();
-
-  formData.append('fullName', document.getElementById('fullNameInput').value);
-  formData.append('instagramUrl', document.getElementById('instagramUrlInput').value);
-  formData.append('instagramUsername', document.getElementById('usernameInput').value);
-  formData.append('bio', document.getElementById('bioInput').value);
-  formData.append('phone', document.getElementById('phoneInput').value);
-  formData.append('notes', document.getElementById('notesInput').value);
-  formData.append('followersCount', document.getElementById('resolvedFollowers').value);
-  formData.append('avatarPath', document.getElementById('resolvedAvatarPath').value);
-
-  if (avatarFile) {
-    formData.append('avatarFile', avatarFile);
-  }
-
-  try {
-    const res = await fetch('/api/couriers', { method: 'POST', body: formData });
-    const data = await res.json();
-
-    if (res.ok && data.success) {
-      closeModal();
-      loadCouriers(searchInput.value);
-    } else {
-      alert(data.error || 'Не удалось сохранить курьера');
-    }
-  } catch (err) {
-    alert('Ошибка сети. Попробуйте снова.');
-  }
-});
-
-// --- Инициализация ---
-checkAuth();
-initMap();
-loadCouriers();
-refreshLiveLocations();
-liveRefreshInterval = setInterval(refreshLiveLocations, 4000);
-
-// Обновляем список карточек реже, чтобы не дёргать поиск во время ввода
-setInterval(() => {
-  if (document.activeElement !== searchInput) {
-    loadCouriers(searchInput.value);
-  }
-}, 10000);
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="/dashboard.js"></script>
+</body>
+</html>
